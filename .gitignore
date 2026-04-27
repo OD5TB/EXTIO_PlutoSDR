@@ -1,0 +1,26 @@
+# build outputs
+build/
+out/
+release/
+*.dll
+*.lib
+*.exp
+*.pdb
+*.obj
+*.ilk
+*.exe
+
+# CI scratch
+libiio-raw/
+libiio-setup.exe
+libiio/
+
+# editor/IDE
+.vs/
+.vscode/
+*.user
+*.suo
+CMakeSettings.json
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
