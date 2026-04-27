@@ -26,6 +26,9 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+      - name: Install pkg-config (libiio's CMake requires it to find libusb / libxml2)
+        run: choco install -y pkgconfiglite --no-progress
+
       - name: Install libiio's dependencies via vcpkg (x86)
         shell: pwsh
         run: |
@@ -33,6 +36,9 @@ jobs:
           Write-Host "Using vcpkg: $vcpkg"
           & $vcpkg install libxml2:x86-windows libusb:x86-windows
           if ($LASTEXITCODE -ne 0) { throw "vcpkg deps install failed ($LASTEXITCODE)" }
+          # Confirm vcpkg dropped .pc files for libusb / libxml2
+          Get-ChildItem "$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows\lib\pkgconfig\*.pc" -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty Name
 
       - name: Clone libiio source
         shell: pwsh
@@ -45,6 +51,13 @@ jobs:
         run: |
           $toolchain     = "$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake"
           $installPrefix = "$PWD\libiio-install"
+
+          # Tell pkg-config where vcpkg dropped its .pc files. libiio's CMake
+          # uses pkg_check_modules() to find libusb-1.0 and libxml2.
+          $env:PKG_CONFIG_PATH = "$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows\lib\pkgconfig"
+          Write-Host "PKG_CONFIG_PATH = $env:PKG_CONFIG_PATH"
+          pkg-config --modversion libusb-1.0
+          pkg-config --modversion libxml-2.0
 
           cmake -S libiio-src -B libiio-build -A Win32 `
                 -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
