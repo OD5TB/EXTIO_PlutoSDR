@@ -13,6 +13,7 @@ jobs:
     env:
       VCPKG_DEFAULT_TRIPLET: x86-windows
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+      LIBIIO_TAG: "v0.25"
 
     steps:
       - name: Checkout
@@ -25,27 +26,53 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Install libiio (32-bit) via vcpkg
+      - name: Install libiio's dependencies via vcpkg (x86)
         shell: pwsh
         run: |
           $vcpkg = "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe"
           Write-Host "Using vcpkg: $vcpkg"
-          & $vcpkg install libiio:x86-windows
-          if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed ($LASTEXITCODE)" }
+          & $vcpkg install libxml2:x86-windows libusb:x86-windows
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg deps install failed ($LASTEXITCODE)" }
 
-          $prefix = "$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows"
-          Write-Host "vcpkg prefix: $prefix"
-          Write-Host "--- include ---"; Get-ChildItem "$prefix\include" -Filter iio.h -Recurse -ErrorAction SilentlyContinue
-          Write-Host "--- lib ---";     Get-ChildItem "$prefix\lib"     -Filter "*iio*"
-          Write-Host "--- bin ---";     Get-ChildItem "$prefix\bin"
+      - name: Clone libiio source
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch $env:LIBIIO_TAG https://github.com/analogdevicesinc/libiio.git libiio-src
+          Write-Host "libiio @ $(git -C libiio-src rev-parse HEAD)"
 
-          "LIBIIO_ROOT=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Build libiio (x86) from source
+        shell: pwsh
+        run: |
+          $toolchain     = "$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake"
+          $installPrefix = "$PWD\libiio-install"
 
-      - name: Configure (CMake, Win32 / x86)
+          cmake -S libiio-src -B libiio-build -A Win32 `
+                -DCMAKE_TOOLCHAIN_FILE="$toolchain" `
+                -DVCPKG_TARGET_TRIPLET=x86-windows `
+                -DCMAKE_INSTALL_PREFIX="$installPrefix" `
+                -DCSHARP_BINDINGS=OFF `
+                -DPYTHON_BINDINGS=OFF `
+                -DCPP_BINDINGS=OFF `
+                -DWITH_DOC=OFF `
+                -DWITH_TESTS=OFF `
+                -DWITH_EXAMPLES=OFF `
+                -DENABLE_PACKAGING=OFF
+          if ($LASTEXITCODE -ne 0) { throw "libiio configure failed" }
+
+          cmake --build libiio-build --config Release --target install --parallel
+          if ($LASTEXITCODE -ne 0) { throw "libiio build failed" }
+
+          Write-Host "--- libiio install tree ---"
+          Get-ChildItem $installPrefix -Recurse -File | Select-Object FullName
+
+          "LIBIIO_ROOT=$installPrefix" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VCPKG_X86_BIN=$env:VCPKG_INSTALLATION_ROOT\installed\x86-windows\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Configure ExtIO project (CMake, Win32 / x86)
         shell: pwsh
         run: cmake -S . -B build -A Win32 -DLIBIIO_ROOT="$env:LIBIIO_ROOT"
 
-      - name: Build (Release)
+      - name: Build ExtIO project (Release)
         shell: pwsh
         run: cmake --build build --config Release --parallel
 
@@ -55,6 +82,8 @@ jobs:
           New-Item -ItemType Directory -Force release | Out-Null
           Copy-Item build\Release\ExtIO_PlutoSDR.dll release\
           Copy-Item "$env:LIBIIO_ROOT\bin\*.dll" release\ -Force -ErrorAction SilentlyContinue
+          Get-ChildItem "$env:VCPKG_X86_BIN\*.dll" -ErrorAction SilentlyContinue |
+              ForEach-Object { Copy-Item $_.FullName release\ -Force }
           Copy-Item README.md release\ -ErrorAction SilentlyContinue
           Get-ChildItem release | Format-Table Name, Length
 
