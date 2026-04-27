@@ -18,9 +18,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install innoextract (for unpacking the libiio installer)
-        run: choco install -y innoextract --no-progress
-
       - name: Download libiio Windows artifact (via release API)
         shell: pwsh
         run: |
@@ -29,12 +26,13 @@ jobs:
           Write-Host "API: $api"
           $rel = Invoke-RestMethod -Uri $api -Headers $headers
 
-          # Prefer the pre-extracted zip; fall back to the Inno Setup installer.
-          $asset = $rel.assets | Where-Object { $_.name -like "*windows*.zip" } | Select-Object -First 1
-          $kind  = "zip"
+          # Prefer the Inno Setup installer — it bundles both MS32 (32-bit) and
+          # MS64 (64-bit). The standalone *-windows.zip is typically 64-bit only.
+          $asset = $rel.assets | Where-Object { $_.name -like "*setup.exe" } | Select-Object -First 1
+          $kind  = "exe"
           if (-not $asset) {
-              $asset = $rel.assets | Where-Object { $_.name -like "*setup.exe" } | Select-Object -First 1
-              $kind  = "exe"
+              $asset = $rel.assets | Where-Object { $_.name -like "*windows*.zip" } | Select-Object -First 1
+              $kind  = "zip"
           }
           if (-not $asset) {
               Write-Host "Available assets:"
@@ -60,32 +58,51 @@ jobs:
           }
           Write-Host "--- top-level layout ---"
           Get-ChildItem -Recurse -Directory libiio-raw | Select-Object -First 40 FullName
-          Write-Host "--- looking for iio.h ---"
-          Get-ChildItem -Recurse -Filter iio.h libiio-raw | Select-Object FullName
-          Write-Host "--- looking for 32-bit libiio.lib ---"
-          Get-ChildItem -Recurse -Filter libiio.lib libiio-raw | Select-Object FullName
+
       - name: Stage libiio (32-bit)
         shell: pwsh
         run: |
-          $iioH = Get-ChildItem -Recurse -Filter iio.h libiio-raw | Sort-Object FullName | Select-Object -First 1
+          Write-Host "=== ALL libiio.lib found in libiio-raw ==="
+          $allLibs = Get-ChildItem -Recurse -Filter libiio.lib libiio-raw
+          $allLibs | ForEach-Object { Write-Host "  $($_.FullName)" }
+
+          Write-Host "=== ALL iio.h found in libiio-raw ==="
+          Get-ChildItem -Recurse -Filter iio.h libiio-raw | ForEach-Object { Write-Host "  $($_.FullName)" }
+
+          $iioH = Get-ChildItem -Recurse -Filter iio.h libiio-raw |
+                  Sort-Object FullName | Select-Object -First 1
           if (-not $iioH) { throw "iio.h not found" }
-          $lib32 = Get-ChildItem -Recurse -Filter libiio.lib libiio-raw |
-                   Where-Object { $_.FullName -match '(MS32|i686|win32|x86)' -and $_.FullName -notmatch '(MS64|x86_64|x64)' } |
+
+          # Pick the 32-bit MSVC variant. ADI Inno installers use 'MS32'.
+          $lib32 = $allLibs |
+                   Where-Object { $_.FullName -match '(MS32|i686|win32|\\x86\\)' -and
+                                  $_.FullName -notmatch '(MS64|x86_64|\\x64\\)' } |
                    Sort-Object FullName | Select-Object -First 1
           if (-not $lib32) {
-              $lib32 = Get-ChildItem -Recurse -Filter libiio.lib libiio-raw |
-                       Where-Object { $_.FullName -notmatch '(MS64|x86_64|x64)' } |
+              $lib32 = $allLibs |
+                       Where-Object { $_.FullName -notmatch '(MS64|x86_64|\\x64\\|amd64)' } |
                        Sort-Object FullName | Select-Object -First 1
           }
-          if (-not $lib32) { throw "32-bit libiio.lib not found" }
+          if (-not $lib32) {
+              throw "32-bit libiio.lib not found — see the listing above."
+          }
+          Write-Host "Picked 32-bit lib: $($lib32.FullName)"
+
           $libDir = Split-Path $lib32.FullName -Parent
           $incDir = Split-Path $iioH.FullName  -Parent
+
           New-Item -ItemType Directory -Force -Path libiio\include | Out-Null
           New-Item -ItemType Directory -Force -Path libiio\lib     | Out-Null
           New-Item -ItemType Directory -Force -Path libiio\bin     | Out-Null
+
           Copy-Item "$incDir\*"     libiio\include -Recurse -Force
           Copy-Item "$libDir\*.lib" libiio\lib                -Force
           Copy-Item "$libDir\*.dll" libiio\bin                -Force -ErrorAction SilentlyContinue
+
+          Write-Host "--- staged libiio\include ---"; Get-ChildItem libiio\include
+          Write-Host "--- staged libiio\lib ---";     Get-ChildItem libiio\lib
+          Write-Host "--- staged libiio\bin ---";     Get-ChildItem libiio\bin
+
           "LIBIIO_ROOT=$(Resolve-Path libiio)" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Configure (CMake, Win32 / x86)
