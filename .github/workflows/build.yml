@@ -11,23 +11,31 @@ jobs:
     runs-on: windows-latest
 
     env:
-      LIBIIO_VERSION: "0.25"
-      LIBIIO_INSTALLER: "libiio-0.25.gb8f3dde-Windows-setup.exe"
+      LIBIIO_TAG: "v0.25"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install innoextract
+      - name: Install innoextract (for unpacking the libiio installer)
         run: choco install -y innoextract --no-progress
 
-      - name: Download libiio Windows installer
+      - name: Download libiio Windows installer (via release API)
         shell: pwsh
         run: |
-          $url = "https://github.com/analogdevicesinc/libiio/releases/download/v$env:LIBIIO_VERSION/$env:LIBIIO_INSTALLER"
-          Write-Host "Downloading: $url"
-          Invoke-WebRequest -Uri $url -OutFile libiio-setup.exe -UseBasicParsing
-
+          $headers = @{ 'User-Agent' = 'github-actions'; 'Accept' = 'application/vnd.github+json' }
+          $api = "https://api.github.com/repos/analogdevicesinc/libiio/releases/tags/$env:LIBIIO_TAG"
+          Write-Host "API: $api"
+          $rel = Invoke-RestMethod -Uri $api -Headers $headers
+          $asset = $rel.assets | Where-Object { $_.name -like "*Windows-setup.exe" } | Select-Object -First 1
+          if (-not $asset) {
+              Write-Host "Available assets:"
+              $rel.assets | ForEach-Object { Write-Host " - $($_.name)" }
+              throw "No '*Windows-setup.exe' asset in release $env:LIBIIO_TAG"
+          }
+          Write-Host "Found asset: $($asset.name)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile libiio-setup.exe -UseBasicParsing
       - name: Extract libiio
         shell: pwsh
         run: |
