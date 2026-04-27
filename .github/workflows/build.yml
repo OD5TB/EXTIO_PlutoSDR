@@ -21,28 +21,49 @@ jobs:
       - name: Install innoextract (for unpacking the libiio installer)
         run: choco install -y innoextract --no-progress
 
-      - name: Download libiio Windows installer (via release API)
+      - name: Download libiio Windows artifact (via release API)
         shell: pwsh
         run: |
           $headers = @{ 'User-Agent' = 'github-actions'; 'Accept' = 'application/vnd.github+json' }
           $api = "https://api.github.com/repos/analogdevicesinc/libiio/releases/tags/$env:LIBIIO_TAG"
           Write-Host "API: $api"
           $rel = Invoke-RestMethod -Uri $api -Headers $headers
-          $asset = $rel.assets | Where-Object { $_.name -like "*Windows-setup.exe" } | Select-Object -First 1
+
+          # Prefer the pre-extracted zip; fall back to the Inno Setup installer.
+          $asset = $rel.assets | Where-Object { $_.name -like "*windows*.zip" } | Select-Object -First 1
+          $kind  = "zip"
+          if (-not $asset) {
+              $asset = $rel.assets | Where-Object { $_.name -like "*setup.exe" } | Select-Object -First 1
+              $kind  = "exe"
+          }
           if (-not $asset) {
               Write-Host "Available assets:"
               $rel.assets | ForEach-Object { Write-Host " - $($_.name)" }
-              throw "No '*Windows-setup.exe' asset in release $env:LIBIIO_TAG"
+              throw "No Windows asset in release $env:LIBIIO_TAG"
           }
-          Write-Host "Found asset: $($asset.name)"
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile libiio-setup.exe -UseBasicParsing
+          Write-Host "Picked asset ($kind): $($asset.name)"
+          $outFile = if ($kind -eq "zip") { "libiio.zip" } else { "libiio-setup.exe" }
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $outFile -UseBasicParsing
+          "LIBIIO_KIND=$kind" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install innoextract (only if we got an installer)
+        if: env.LIBIIO_KIND == 'exe'
+        run: choco install -y innoextract --no-progress
+
       - name: Extract libiio
         shell: pwsh
         run: |
-          innoextract -d libiio-raw libiio-setup.exe
+          if ($env:LIBIIO_KIND -eq "zip") {
+              Expand-Archive -Path libiio.zip -DestinationPath libiio-raw -Force
+          } else {
+              innoextract -d libiio-raw libiio-setup.exe
+          }
+          Write-Host "--- top-level layout ---"
+          Get-ChildItem -Recurse -Directory libiio-raw | Select-Object -First 40 FullName
+          Write-Host "--- looking for iio.h ---"
           Get-ChildItem -Recurse -Filter iio.h libiio-raw | Select-Object FullName
+          Write-Host "--- looking for 32-bit libiio.lib ---"
           Get-ChildItem -Recurse -Filter libiio.lib libiio-raw | Select-Object FullName
-
       - name: Stage libiio (32-bit)
         shell: pwsh
         run: |
