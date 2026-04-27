@@ -1,0 +1,40 @@
+// ExtIO_PlutoSDR.rc — Settings dialog resource.
+
+#include <windows.h>
+#include "resource.h"
+
+IDD_SETTINGS DIALOGEX 0, 0, 260, 200
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "ExtIO PlutoSDR — Settings"
+FONT 8, "Segoe UI", 400, 0, 0x0
+BEGIN
+    LTEXT           "URI:",                  -1,             10,  10, 30, 10
+    EDITTEXT        IDC_URI,                                 45,   8, 130, 14, ES_AUTOHSCROLL
+    PUSHBUTTON      "Connect",               IDC_CONNECT,   180,   8,  35, 14
+    PUSHBUTTON      "Disconnect",            IDC_DISCONNECT, 218,   8,  35, 14
+
+    LTEXT           "Sample rate:",          -1,             10,  35, 60, 10
+    COMBOBOX        IDC_SAMPLERATE,                          75,  33, 100, 80,
+                                                             CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           "RF bandwidth:",         -1,             10,  55, 60, 10
+    COMBOBOX        IDC_BANDWIDTH,                           75,  53, 100, 80,
+                                                             CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           "Gain mode:",            -1,             10,  75, 60, 10
+    COMBOBOX        IDC_GAINMODE,                            75,  73, 100, 80,
+                                                             CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
+    LTEXT           "Manual gain (dB):",     IDC_GAIN_LABEL, 10,  95, 60, 10
+    EDITTEXT        IDC_GAIN,                                75,  93,  40, 12, ES_AUTOHSCROLL | ES_NUMBER
+
+    LTEXT           "XO ppm correction:",    -1,             10, 115, 60, 10
+    EDITTEXT        IDC_PPM,                                 75, 113,  40, 12, ES_AUTOHSCROLL
+
+    PUSHBUTTON      "Apply",                 IDC_APPLY,     180, 113,  60, 14
+
+    LTEXT           "Status: idle",          IDC_STATUS,     10, 145, 240, 10
+
+    LTEXT           "Built from source — see github.com/<your-fork>/ExtIO_PlutoSDR",
+                    -1, 10, 175, 240, 10
+END

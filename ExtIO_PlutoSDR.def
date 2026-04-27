@@ -1,0 +1,32 @@
+; ExtIO_PlutoSDR.def — Force undecorated stdcall exports for the ExtIO ABI.
+; HDSDR/Winrad expect plain names like `StartHW`, not `_StartHW@4`.
+
+LIBRARY "ExtIO_PlutoSDR"
+
+EXPORTS
+    InitHW
+    OpenHW
+    CloseHW
+    StartHW
+    StopHW
+    SetHWLO
+    GetHWLO
+    GetHWSR
+    GetStatus
+    SetCallback
+    ShowGUI
+    HideGUI
+    SwitchGUI
+    ExtIoGetSrates
+    ExtIoGetActualSrateIdx
+    ExtIoSetSrate
+    ExtIoGetBandwidth
+    ExtIoGetMGCs
+    ExtIoGetActualMgcIdx
+    ExtIoSetMGC
+    ExtIoGetAGCs
+    ExtIoGetActualAGCidx
+    ExtIoSetAGC
+    ExtIoGetSetting
+    ExtIoSetSetting
+    VersionInfo
