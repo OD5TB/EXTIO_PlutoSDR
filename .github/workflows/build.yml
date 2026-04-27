@@ -1,0 +1,84 @@
+name: build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    env:
+      LIBIIO_VERSION: "0.25"
+      LIBIIO_INSTALLER: "libiio-0.25.gb8f3dde-Windows-setup.exe"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install innoextract
+        run: choco install -y innoextract --no-progress
+
+      - name: Download libiio Windows installer
+        shell: pwsh
+        run: |
+          $url = "https://github.com/analogdevicesinc/libiio/releases/download/v$env:LIBIIO_VERSION/$env:LIBIIO_INSTALLER"
+          Write-Host "Downloading: $url"
+          Invoke-WebRequest -Uri $url -OutFile libiio-setup.exe -UseBasicParsing
+
+      - name: Extract libiio
+        shell: pwsh
+        run: |
+          innoextract -d libiio-raw libiio-setup.exe
+          Get-ChildItem -Recurse -Filter iio.h libiio-raw | Select-Object FullName
+          Get-ChildItem -Recurse -Filter libiio.lib libiio-raw | Select-Object FullName
+
+      - name: Stage libiio (32-bit)
+        shell: pwsh
+        run: |
+          $iioH = Get-ChildItem -Recurse -Filter iio.h libiio-raw | Sort-Object FullName | Select-Object -First 1
+          if (-not $iioH) { throw "iio.h not found" }
+          $lib32 = Get-ChildItem -Recurse -Filter libiio.lib libiio-raw |
+                   Where-Object { $_.FullName -match '(MS32|i686|win32|x86)' -and $_.FullName -notmatch '(MS64|x86_64|x64)' } |
+                   Sort-Object FullName | Select-Object -First 1
+          if (-not $lib32) {
+              $lib32 = Get-ChildItem -Recurse -Filter libiio.lib libiio-raw |
+                       Where-Object { $_.FullName -notmatch '(MS64|x86_64|x64)' } |
+                       Sort-Object FullName | Select-Object -First 1
+          }
+          if (-not $lib32) { throw "32-bit libiio.lib not found" }
+          $libDir = Split-Path $lib32.FullName -Parent
+          $incDir = Split-Path $iioH.FullName  -Parent
+          New-Item -ItemType Directory -Force -Path libiio\include | Out-Null
+          New-Item -ItemType Directory -Force -Path libiio\lib     | Out-Null
+          New-Item -ItemType Directory -Force -Path libiio\bin     | Out-Null
+          Copy-Item "$incDir\*"     libiio\include -Recurse -Force
+          Copy-Item "$libDir\*.lib" libiio\lib                -Force
+          Copy-Item "$libDir\*.dll" libiio\bin                -Force -ErrorAction SilentlyContinue
+          "LIBIIO_ROOT=$(Resolve-Path libiio)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Configure (CMake, Win32 / x86)
+        shell: pwsh
+        run: cmake -S . -B build -A Win32 -DLIBIIO_ROOT="$env:LIBIIO_ROOT"
+
+      - name: Build (Release)
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Stage release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item build\Release\ExtIO_PlutoSDR.dll release\
+          Copy-Item libiio\bin\*.dll release\ -Force -ErrorAction SilentlyContinue
+          Copy-Item README.md release\ -ErrorAction SilentlyContinue
+          Get-ChildItem release | Format-Table Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ExtIO_PlutoSDR-win32
+          path: release/**
+          if-no-files-found: error
